@@ -6,9 +6,7 @@ from email import policy
 from bs4 import BeautifulSoup # Pour extraire les liens du contenu HTML
 
 
-filepath = "" # À completer
-with open(filepath, "rb") as f:
-    msg = BytesParser(policy=policy.default).parse(f)
+
 
 """
 Élements à extraire du mail:

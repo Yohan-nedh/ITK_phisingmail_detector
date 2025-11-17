@@ -1,0 +1,21 @@
+Vous trouverez ci-dessous une liste de contrôle des informations pertinentes qu'un analyste (vous) doit collecter à partir de l'en-tête de l'e-mail :
+
+Adresse e-mail de l'expéditeur
+Adresse IP de l'expéditeur
+Recherche inversée de l'adresse IP de l'expéditeur
+Objet de l'e-mail
+Adresse e-mail du destinataire (ces informations peuvent figurer dans le champ CC/BCC)
+Adresse e-mail de réponse (le cas échéant)
+Date/heureprénom en v a u et prénom en v a u et ii
+
+========MENU========
+Options :
+1. possibilité d'extraire les informations de l'en-tête de l'e-mail à part et de même pour les autres parties de l'email
+2. possibilité d'extraire toutes les informations de l'e-mail en une seule fois
+
+========IDEES========
+- Une partie ludique pour eduquer les utilisateurs sur la manière de repérer les e-mails frauduleux
+- Un système de points pour récompenser les utilisateurs qui identifient correctement les menaces
+- Un tableau de classement pour encourager la compétition entre les utilisateurs
+- Des scénarios d'e-mails simulés pour la formation pratique
+- Des quiz interactifs pour tester les connaissances des utilisateurs sur la sécurité des e-mails

@@ -1,0 +1,28 @@
+From: "PayPal" <support@paypa1.com>
+To: client@exemple.com
+Subject: URGENT : Votre compte PayPal sera bloqué
+Reply-To: reply@hacker.ru
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="boundary123"
+
+--boundary123
+Content-Type: text/plain; charset=utf-8
+
+Bonjour,
+
+Votre compte PayPal présente une activité suspecte.
+Cliquez ici pour vérifier : http://bit.ly/3fake-paypal
+
+--boundary123
+Content-Type: text/html; charset=utf-8
+
+<html>
+<body>
+<p><strong>URGENT</strong> : Votre compte sera <u>bloqué dans 24h</u>.</p>
+<p><a href="http://paypa1-login.com">Connexion sécurisée</a></p>
+<p>Pièce jointe : <a href="update.exe">Mise à jour PayPal</a></p>
+</body>
+</html>
+
+--boundary123--
