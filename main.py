@@ -81,5 +81,5 @@ def analyser_email(chemin_fichier):
 
 # === LANCEMENT ===
 if __name__ == "__main__":
-    chemin = "data/email_test.eml"
+    chemin = "data/suspicious_mail.txt"
     analyser_email(chemin)
