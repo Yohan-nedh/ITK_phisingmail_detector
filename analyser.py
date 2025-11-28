@@ -6,6 +6,7 @@ Compatible avec mail_parsing.py
 
 import re
 import tldextract
+import Levenshtein # détction de typosquattage 
 from urllib.parse import urlparse
 
 # === CONFIGURATION LOCALE ===
@@ -58,6 +59,14 @@ def take_url(url):
         return ""
 
 
+def is_lookalike(domain):
+    """Détecte le typosquattage"""
+    for legit in WHITELIST_DOMAINS:
+        if 1 <= Levenshtein.distance() <=2:
+            return True, legit
+    return False, None
+
+
 # === ANALYSES ===
 def analyse_headers(headers):
     """Analyse les en-têtes (From, Reply-To, authentification)."""
@@ -76,6 +85,11 @@ def analyse_headers(headers):
     if get_tld(from_domain) in BLACKLIST_DOMAINS:
         score += 50
         issues.append(f"Domaine connu pour phishing : {from_domain}")
+    elif from_domain:
+        lookalike, true_domain = is_lookalike(from_domain)
+        if lookalike:
+            score += 20
+            issues.append(f"{domain} ressemble à {target} → risque phishing")
     elif from_domain and get_tld(from_domain) not in WHITELIST_DOMAINS:
         if any(legit in from_domain for legit in ["paypal", "amazon", "banque", "gmail"]): # À revoir, ça va créer trop de faux positifs, le cas de 
             score += 40
@@ -127,6 +141,8 @@ def analyse_liens(body, sender_domain):
     issues = []
     links = body.get("links", [])
 
+    url_regex = r'\b(?:https?://|www\.)[a-zA-Z0-9._\-~:/?#\[\]@!$&\'()*+,;=%]+(?<![)\],.;!?])'
+
     for link in links:
         # Si c'est une URL brute (str), pas un tuple
         if isinstance(link, str):
@@ -136,11 +152,15 @@ def analyse_liens(body, sender_domain):
             display_text, url = link
 
         url_domain = take_url(url)
-
+        
         # Lien usurpé (texte ≠ domaine)
-        if display_text.lower() not in url_domain and sender_domain not in url_domain: # Un peu, il faut comparer le display text au domaine seulement si le texte affiché ressemble à un lien
-            score += 25
-            issues.append(f"Lien usurpé : « {display_text} » → {url_domain}")
+        matches = re.findall(url_regex, display_text)
+        for l in matches:
+            domain_in_text = take_url(l)
+            if domain_in_text and domain_in_text != url_domain and sender_domain not in url_domain:
+                score += 25
+                issues.append(f"Lien usurpé : « {l} » → {url_domain}")
+    
 
         # Domaine différent de l'expéditeur
         if sender_domain and sender_domain not in url_domain:
@@ -229,5 +249,5 @@ MODIFS:
 """
 AUTRES REMARQUES
 - La white list, black list, suspicious word ne sont pas assez exhaustives. Ça peut biaiser les résultats. DOnc, on va revoir ça.
-- 
+- Suspicious keyword est en français, dans le cas où le mail est dans une autre langue.....
 """
