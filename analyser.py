@@ -8,8 +8,13 @@ import re
 import tldextract
 import Levenshtein # détection de typosquattage
 import whois
+import contextlib, io
+import json, time
+from pathlib import Path
 from datetime import datetime
 from urllib.parse import urlparse
+from email.utils import parseaddr
+from email.header import decode_header
 
 # Optionnel: Au cas où l'user n'aura pas la connexion internet
 try:
@@ -66,14 +71,22 @@ DANGEROUS_MIME = {"application/x-msdownload", "application/x-msdos-program", "ap
 # === FONCTIONS UTILITAIRES ===
 def normalize_email_addr(addr):
     """Nettoie le champ possible: 'Name <user@domain>' -> user@domain"""
-    if not addr:
-        return ""
-    if "<" in addr and ">" in addr:
-        last = addr[addr.find("<") + 1: addr.find(">")]
-        return last.strip().lower()
-    return addr.strip().lower()
-
-
+    if not addr: 
+    	return "", ""
+    	
+    name, mail = parseaddr(addr)
+    
+    # Décodage RFC2047 éventuel (=?utf-8?...?=)
+    if name:
+        decoded = decode_header(name)
+        name = "".join(
+            part.decode(encoding or "utf-8") if isinstance(part, bytes) else part
+            for part, encoding in decoded
+        )
+        
+    return name, mail
+    
+    
 def get_host_reg_domain(hostname):
     """Extrait le domaine enrégistré d'un hostname."""
     if not hostname:
@@ -94,6 +107,16 @@ def get_host_reg_domain(hostname):
     return ext.domain
 
 
+def get_host(domain):
+	"""Extrait le host du domaine: amazon.com -> amazon, paypal.com -> paypal"""
+	if not domain:
+		return ""
+		
+	ext = tldextract.extract(domain)
+	if ext.domain:
+		return f"{ext.domain}"
+	
+	
 def get_url_reg_domain(url):
     """Extrait le nom de domaine d'une URL."""
     try:
@@ -121,16 +144,37 @@ def extract_host_from_url(url):
         return ""
 
 
+CACHE_FILE = Path("data/whois_cache.json")
+ERROR_TTL = 300
+
+def load_whois_cache():
+    """Charge le cache WHOIS"""
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+    
+
+def save_whois_cache(cache):
+    """Sauvegarde le cache WHOIS"""
+    CACHE_FILE.parent.mkdir(exist_ok=True)
+    json.dump(cache, open(CACHE_FILE, "w"), indent=2)
+        
+     
 def get_domain_age(domain):
-    """Retourne l'âge du domaine en jours, ou -1 en cas de doute."""
+    """Retourne l'âge du domaine en jours, ou None si inconnu."""
     try:
-        w = whois.whois(domain)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()): # Pour ne pas afficher les erreurs dans la sortie
+            w = whois.whois(domain)
     except Exception:
-        return -1
+    	return None
 
     creation = w.creation_date
 
-    # Peut être une liste → on prend la plus ancienne (plus logique)
+    # Si c'est une liste, on prend la plus ancienne
     if isinstance(creation, list):
         creation = min(creation)
 
@@ -139,16 +183,47 @@ def get_domain_age(domain):
         try:
             creation = datetime.fromisoformat(creation)
         except:
-            return -1
+            return None
 
     # Vérifie que c'est bien un datetime
     if not isinstance(creation, datetime):
-        return -1
+        return None
 
     # Neutraliser timezone-aware datetimes
     creation = creation.replace(tzinfo=None)
+    
+    age = (datetime.utcnow() - creation).days
+    return age
+    
 
-    return (datetime.utcnow() - creation).days
+def get_domain_age_cached(domain):
+    now = int(time.time())
+    cache = load_whois_cache()
+
+    # entrée existante
+    if domain in cache:
+        entry = cache[domain]
+
+        if "age" in entry:
+            return entry["age"]
+            
+        if "error" in entry:
+            # Erreur récente
+            if now - entry["ts"] < ERROR_TTL:
+                return None
+
+    # Faire un WHOIS réel
+    age = get_domain_age(domain)
+
+    if age is not None:
+        cache[domain] = {"age": age, "ts": now}
+        save_whois_cache(cache)
+        return age
+
+    # Erreur: enregistrer une entrée temporaire
+    cache[domain] = {"error": "timeout", "ts": now}
+    save_whois_cache(cache)
+    return None
 
 
 def is_shortener(hostname):
@@ -182,7 +257,7 @@ def is_lookalike(domain, candidates=None, max_distance=2):
     best = None
     best_d = None
     for cand in candidates:
-        d = Levenshtein.distance(domain, cand)
+        d = Levenshtein.distance(get_host(domain), get_host(cand))
         if best is None or d < best_d:
             best = cand
             best_d = d
@@ -200,8 +275,10 @@ def analyse_headers(headers):
     # --- Expéditeur ---
     from_raw = headers.get("from", "")
     reply_to_raw = headers.get("reply_to", "")
-    from_addr = normalize_email_addr(from_raw)
-    reply_to = normalize_email_addr(reply_to_raw)
+    
+    from_username, from_addr = normalize_email_addr(from_raw)
+    reply_to_username, reply_to = normalize_email_addr(reply_to_raw)
+    
     from_reg = get_host_reg_domain(from_addr)
     reply_reg = get_host_reg_domain(reply_to)
     
@@ -218,17 +295,10 @@ def analyse_headers(headers):
             score += 20
             issues.append(f"Incohérence entre les champs 'De' et 'Répondre à': {from_reg} != {reply_reg}, reply-to pointe vers une adresse privée alors que l'emetteur est une entreprise")
 
-        if (from_reg and reply_reg) not in FREEMAIL_DOMAINS:
+        if from_reg not in FREEMAIL_DOMAINS and reply_reg not in FREEMAIL_DOMAINS:
             score += 10
+            
         
-        from_username = from_raw.split()[:-1]
-        if isinstance(from_username, list):
-            from_username = "".join(from_username).strip()
-
-        reply_to_username = reply_to_raw.split()[:-1]
-        if isinstance(reply_to_username, list):
-            reply_to_username = "".join(reply_to_username).strip()
-
         if from_username and reply_to_username and from_username != reply_to_username:
             score += 20
             issues.append(f"Incohérence entre les usernames des champs 'De' et 'Répondre à': {from_username} != {reply_to_username}")
@@ -248,13 +318,13 @@ def analyse_headers(headers):
                     score += 40
                     issues.append(f"Domaine falsifié : {from_reg}")
                 else:
-                    age = get_domain_age(from_reg)
+                    age = get_domain_age_cached(from_reg)
 
-                    if age == -1:
-                        score += 10    # pas d’info WHOIS → léger risque
+                    if age is None:
+                        score += 10    # pas d’info WHOIS: léger risque
                         issues.append(f"Pas d'informations whois sur le domaine : {from_reg}")
                     elif age < 30:
-                        score += 40    # domaine ultra récent → gros risque
+                        score += 30    # domaine ultra récent: gros risque
                         issues.append(f"Domaine très récent : {from_reg}")
                     elif age < 180:
                         score += 20    # domaine récent
@@ -289,8 +359,8 @@ def analyse_headers(headers):
     # --- Champs Received pour le nombre de serveurs relais ---
     received_headers = headers.get("received", {}).get("raw", [])
     received_len = len(received_headers)
-    if received_len >= 6:
-        score += 15
+    if received_len >= 8:
+        score += 5
         issues.append(f"Trop de serveurs relais: {received_len}")
         
         sender_ip = headers.get("received", {}).get("sender_ip", "")
@@ -351,7 +421,7 @@ def analyse_liens(body, sender_domain_reg):
         # Détection de typosquattage
         look, match, dist = is_lookalike(url_reg)
         if look:
-            score += 40
+            score += 20
             issues.append(f"Possible typosquat: {url_reg} ressemble à {match} (d={dist})")
         
         # Lien usurpé (texte ≠ domaine)
@@ -367,8 +437,8 @@ def analyse_liens(body, sender_domain_reg):
         # Domaine différent de l'expéditeur
         if sender_domain_reg and sender_domain_reg not in url_reg:
             if url_reg not in WHITELIST_DOMAINS: # Pour ne pas trop agressif envers les CDNs/trackers courants
-                link_age = get_domain_age(url_reg)
-                if link_age != -1:
+                link_age = get_domain_age_cached(url_reg)
+                if link_age != None:
                     if link_age < 30:
                         score += 40
                         issues.append(f"Lien externe non reconnu : {url_reg} (expéditeur: {sender_domain_reg})")
@@ -385,7 +455,7 @@ def analyse_liens(body, sender_domain_reg):
             if requests:
                 resolved = resolve_shortener(url)
                 if resolved and resolved != url:
-                    dest_reg = get_registered_domain_from_url(resolved)
+                    dest_reg = get_url_reg_domain(resolved)
                     issues.append(f"Shortener résolu vers {dest_reg}")
                     # reévaluer resolved dest
                     if dest_reg in BLACKLIST_DOMAINS:
@@ -428,7 +498,7 @@ def detecter_phishing(headers, body):
     total_score = 0
     all_issues = []
 
-    sender_domain_reg = normalize_email_addr(headers.get("from", ""))
+    _, sender_domain_reg = normalize_email_addr(headers.get("from", ""))
     sender_domain_reg = get_host_reg_domain(sender_domain_reg)
 
     # Toutes les analyses
@@ -438,11 +508,12 @@ def detecter_phishing(headers, body):
         analyse_liens(body, sender_domain_reg),
         analyse_pieces_jointes(body)
     ]
-
+    
+	
     for s, i in analyses:
         total_score += s
         all_issues.extend(i)
-
+    
     unique_issues = []
     seen = set()
 
@@ -498,6 +569,7 @@ MODIFS:
 AUTRES REMARQUES:
 - La white list, black list, suspicious word ne sont pas assez exhaustives. Ça peut biaiser les résultats. DOnc, on va revoir ça.
 - Suspicious keyword est en français, dans le cas où le mail est dans une autre langue.....
+- Revoir is_lookalike pour détecter les attaques d'homoglyphes
 """
 
 
