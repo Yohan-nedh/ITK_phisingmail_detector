@@ -29,10 +29,10 @@ FILE ANALYSIS |***|
 ## Install
 Make sure you have Python installed.
 
-To use this tool, you need to clone this github repository (https://github.com/Yohan-nedh/ITK_phisingmail_detector.git) and install the requirements as follows:
+To use this tool, you need to clone this github repository (https://github.com/Yohan-nedh/ITK_phishingmail_detector.git) and install the requirements as follows:
 
 ```zsh
-└─$ git clone https://github.com/Yohan-nedh/ITK_phisingmail_detector.git
+└─$ git clone https://github.com/Yohan-nedh/ITK_phishingmail_detector.git
 
 └─$ cd ITK_phisingmail_detector.git
 
